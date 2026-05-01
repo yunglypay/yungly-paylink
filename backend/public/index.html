@@ -290,7 +290,7 @@ tr:hover td{background:var(--bg)}
 </div>
 
 <script>
-const API = 'http://localhost:3000/api';
+const API = `${window.location.origin}/api`;
 let currentUser = null;
 let currentRole = 'teen';
 let selectedPayMethod = 'UPI';
@@ -733,7 +733,7 @@ async function createLink() {
   } catch(e) {
     // demo fallback
     lastCreatedLinkId = 'lnk_demo';
-    document.getElementById('clUrl').textContent = `http://localhost:3000/pay/lnk_demo`;
+    document.getElementById('clUrl').textContent = `${window.location.origin}/pay/lnk_demo`;
     document.getElementById('clResult').style.display = 'block';
   }
 }
@@ -744,7 +744,7 @@ function copyLinkUrl() {
 }
 
 function viewPayPageDirect() { if(lastCreatedLinkId) openPayPage(lastCreatedLinkId); closeModal(); }
-function copyLink(id) { navigator.clipboard.writeText(`http://localhost:3000/pay/${id}`).then(()=>showToast('Link copied!')).catch(()=>showToast('Copied!')); }
+function copyLink(id) { navigator.clipboard.writeText(`${window.location.origin}/pay/${id}`).then(()=>showToast('Link copied!')).catch(()=>showToast('Copied!')); }
 function viewPayPage(id) { openPayPage(id); }
 
 // ─── RECEIPT MODAL ────────────────────────────────────────────────────────────
