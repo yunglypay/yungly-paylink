@@ -6,7 +6,8 @@ const path = require('path');
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../frontend/public')));
+const frontendPath = path.join(process.cwd(), 'frontend', 'public');
+app.use(express.static(frontendPath));
 
 // ─── IN-MEMORY STORE (replace with DB in prod) ───────────────────────────────
 const users   = new Map(); // userId → user object
@@ -264,7 +265,7 @@ app.get('/api/admin/transactions', (req, res) => {
 });
 
 // ─── SERVE SPA ────────────────────────────────────────────────────────────────
-app.get('/pay/:id', (req, res) => res.sendFile(path.join(__dirname, '../frontend/public/index.html')));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../frontend/public/index.html')));
+app.get('/pay/:id', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
+app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(3000, () => console.log('Yungly PayLink backend running on http://localhost:3000'));
