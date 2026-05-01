@@ -107,7 +107,7 @@ app.post('/api/paylinks', (req, res) => {
     createdAt: now()
   };
   links.set(id, link);
-  res.json({ link, payUrl: `http://localhost:3000/pay/${id}` });
+ res.json({ link, payUrl: `https://${req.get('host')}/pay/${id}` });
 });
 
 app.get('/api/paylinks', (req, res) => {
