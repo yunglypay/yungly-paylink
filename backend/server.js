@@ -269,55 +269,18 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../frontend/public
 
 app.listen(3000, () => console.log('Yungly PayLink backend running on http://localhost:3000'));
 
-// ─── OTP + ONBOARDING ────────────────────────────────────────────────────────
-const otpStore = new Map(); // phone → { otp, expires }
+// ─── ONBOARDING (password-based, no OTP) ─────────────────────────────────────
 const sessions = new Map(); // sessionId → { phone, name, displayName, balance, links, txns }
 
-const FAST2SMS_KEY = 'YOUR_FAST2SMS_API_KEY'; // swap with real key from fast2sms.com
-
-app.post('/api/otp/send', async (req, res) => {
-  const { phone } = req.body;
-  if (!phone || phone.length < 10) return res.status(400).json({ error: 'Invalid phone number' });
-
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  otpStore.set(phone, { otp, expires: Date.now() + 5 * 60 * 1000 });
-
-  // Try Fast2SMS
-  try {
-    const response = await fetch(
-      `https://www.fast2sms.com/dev/bulkV2?authorization=${FAST2SMS_KEY}&route=otp&variables_values=${otp}&flash=0&numbers=${phone}`,
-      { method: 'GET', headers: { 'cache-control': 'no-cache' } }
-    );
-    const data = await response.json();
-    if (data.return === true) {
-      console.log(`OTP ${otp} sent to ${phone}`);
-      return res.json({ ok: true, message: 'OTP sent' });
-    }
-  } catch(e) {
-    console.log('Fast2SMS error:', e.message);
-  }
-
-  // Fallback: log OTP to console (dev mode)
-  console.log(`[DEV] OTP for ${phone}: ${otp}`);
-  res.json({ ok: true, message: 'OTP sent (dev mode)', devOtp: FAST2SMS_KEY === 'YOUR_FAST2SMS_API_KEY' ? otp : undefined });
-});
-
-app.post('/api/otp/verify', (req, res) => {
-  const { phone, otp } = req.body;
-  const stored = otpStore.get(phone);
-  if (!stored) return res.status(400).json({ error: 'OTP not found. Request a new one.' });
-  if (Date.now() > stored.expires) { otpStore.delete(phone); return res.status(400).json({ error: 'OTP expired. Request a new one.' }); }
-  if (stored.otp !== otp) return res.status(400).json({ error: 'Incorrect OTP' });
-  otpStore.delete(phone);
-  res.json({ ok: true, phone });
-});
-
 app.post('/api/onboard', (req, res) => {
-  const { phone, name, displayName, parentPhone } = req.body;
+  const { phone, password, name, displayName, parentPhone } = req.body;
   if (!phone || !name) return res.status(400).json({ error: 'Missing fields' });
+  if (!password || password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   const sessionId = uid('sess');
+  // Hash password with SHA-256 (use bcrypt in production)
+  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
   const session = {
-    sessionId, phone, name,
+    sessionId, phone, passwordHash, name,
     displayName: displayName || name.split(' ')[0] + ' Creations',
     parentPhone: parentPhone || '',
     balance: 0,
