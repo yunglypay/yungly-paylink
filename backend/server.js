@@ -273,7 +273,7 @@ app.listen(3000, () => console.log('Yungly PayLink backend running on http://loc
 const otpStore = new Map(); // phone → { otp, expires }
 const sessions = new Map(); // sessionId → { phone, name, displayName, balance, links, txns }
 
-const FAST2SMS_KEY = 'YOUR_FAST2SMS_API_KEY'; // swap with real key from fast2sms.com
+const FAST2SMS_KEY = process.env.FAST2SMS_KEY || 'A2sEKLMf4dmiW6ywzC7uZbhPgXjt8kJDq1SlrUBv50poIVaQYTW9xDNe3CGnBXStlIvyQZJuhUOPsEib';// swap with real key from fast2sms.com
 
 app.post('/api/otp/send', async (req, res) => {
   const { phone } = req.body;
