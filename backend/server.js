@@ -6,8 +6,7 @@ const path = require('path');
 const app = express();
 app.use(cors());
 app.use(express.json());
-const frontendPath = path.join(__dirname, 'public');
-app.use(express.static(frontendPath));
+app.use(express.static(path.join(__dirname, '../frontend/public')));
 
 // ─── IN-MEMORY STORE (replace with DB in prod) ───────────────────────────────
 const users   = new Map(); // userId → user object
@@ -107,7 +106,7 @@ app.post('/api/paylinks', (req, res) => {
     createdAt: now()
   };
   links.set(id, link);
- res.json({ link, payUrl: `https://${req.get('host')}/pay/${id}` });
+  res.json({ link, payUrl: `http://localhost:3000/pay/${id}` });
 });
 
 app.get('/api/paylinks', (req, res) => {
@@ -265,7 +264,123 @@ app.get('/api/admin/transactions', (req, res) => {
 });
 
 // ─── SERVE SPA ────────────────────────────────────────────────────────────────
-app.get('/pay/:id', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
-app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
+app.get('/pay/:id', (req, res) => res.sendFile(path.join(__dirname, '../frontend/public/index.html')));
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../frontend/public/index.html')));
 
 app.listen(3000, () => console.log('Yungly PayLink backend running on http://localhost:3000'));
+
+// ─── OTP + ONBOARDING ────────────────────────────────────────────────────────
+const otpStore = new Map(); // phone → { otp, expires }
+const sessions = new Map(); // sessionId → { phone, name, displayName, balance, links, txns }
+
+const FAST2SMS_KEY = 'YOUR_FAST2SMS_API_KEY'; // swap with real key from fast2sms.com
+
+app.post('/api/otp/send', async (req, res) => {
+  const { phone } = req.body;
+  if (!phone || phone.length < 10) return res.status(400).json({ error: 'Invalid phone number' });
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  otpStore.set(phone, { otp, expires: Date.now() + 5 * 60 * 1000 });
+
+  // Try Fast2SMS
+  try {
+    const response = await fetch(
+      `https://www.fast2sms.com/dev/bulkV2?authorization=${FAST2SMS_KEY}&route=otp&variables_values=${otp}&flash=0&numbers=${phone}`,
+      { method: 'GET', headers: { 'cache-control': 'no-cache' } }
+    );
+    const data = await response.json();
+    if (data.return === true) {
+      console.log(`OTP ${otp} sent to ${phone}`);
+      return res.json({ ok: true, message: 'OTP sent' });
+    }
+  } catch(e) {
+    console.log('Fast2SMS error:', e.message);
+  }
+
+  // Fallback: log OTP to console (dev mode)
+  console.log(`[DEV] OTP for ${phone}: ${otp}`);
+  res.json({ ok: true, message: 'OTP sent (dev mode)', devOtp: FAST2SMS_KEY === 'YOUR_FAST2SMS_API_KEY' ? otp : undefined });
+});
+
+app.post('/api/otp/verify', (req, res) => {
+  const { phone, otp } = req.body;
+  const stored = otpStore.get(phone);
+  if (!stored) return res.status(400).json({ error: 'OTP not found. Request a new one.' });
+  if (Date.now() > stored.expires) { otpStore.delete(phone); return res.status(400).json({ error: 'OTP expired. Request a new one.' }); }
+  if (stored.otp !== otp) return res.status(400).json({ error: 'Incorrect OTP' });
+  otpStore.delete(phone);
+  res.json({ ok: true, phone });
+});
+
+app.post('/api/onboard', (req, res) => {
+  const { phone, name, displayName, parentPhone } = req.body;
+  if (!phone || !name) return res.status(400).json({ error: 'Missing fields' });
+  const sessionId = uid('sess');
+  const session = {
+    sessionId, phone, name,
+    displayName: displayName || name.split(' ')[0] + ' Creations',
+    parentPhone: parentPhone || '',
+    balance: 0,
+    monthlyReceived: 0,
+    monthlyLimit: 5000,
+    links: [],
+    txns: [],
+    createdAt: now()
+  };
+  sessions.set(sessionId, session);
+  res.json({ ok: true, sessionId, user: session });
+});
+
+app.get('/api/session/:sessionId', (req, res) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  res.json(session);
+});
+
+// Session-based PayLink
+app.post('/api/session/:sessionId/paylinks', (req, res) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  const { amount, purpose, note, expiryDays } = req.body;
+  const id = uid('lnk');
+  const link = {
+    id, amount: +amount, purpose, note,
+    displayName: session.displayName,
+    status: 'active',
+    txnId: null,
+    expiresAt: new Date(Date.now() + (expiryDays||7)*86400000).toISOString(),
+    createdAt: now()
+  };
+  session.links.unshift(link);
+  sessions.set(session.sessionId, session);
+  res.json({ link, payUrl: `https://yungly-paylink-production.up.railway.app/pay/${id}` });
+});
+
+app.get('/api/session/:sessionId/paylinks', (req, res) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  res.json(session.links);
+});
+
+// Session-based payment confirm
+app.post('/api/session/:sessionId/pay/:linkId/confirm', (req, res) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  const link = session.links.find(l => l.id === req.params.linkId);
+  if (!link) return res.status(404).json({ error: 'Link not found' });
+  const { customerName, paymentMethod } = req.body;
+  const txnId = uid('txn');
+  const txn = {
+    id: txnId, linkId: link.id, amount: link.amount,
+    purpose: link.purpose, from: customerName || 'Customer',
+    paymentMethod: paymentMethod || 'UPI',
+    status: 'success', createdAt: now()
+  };
+  link.status = 'paid';
+  link.txnId = txnId;
+  session.txns.unshift(txn);
+  session.balance += link.amount;
+  session.monthlyReceived += link.amount;
+  sessions.set(session.sessionId, session);
+  res.json({ txn, session });
+});
