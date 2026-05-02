@@ -1,10 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const path = require('path');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+const frontendPath = path.join(__dirname, 'public');
+app.use(express.static(frontendPath));
 
 // ─── IN-MEMORY STORE (replace with DB in prod) ───────────────────────────────
 const users   = new Map(); // userId → user object
@@ -104,7 +107,7 @@ app.post('/api/paylinks', (req, res) => {
     createdAt: now()
   };
   links.set(id, link);
-  res.json({ link, payUrl: `http://localhost:3000/pay/${id}` });
+ res.json({ link, payUrl: `https://${req.get('host')}/pay/${id}` });
 });
 
 app.get('/api/paylinks', (req, res) => {
@@ -261,56 +264,8 @@ app.get('/api/admin/transactions', (req, res) => {
   res.json([...txns.values()].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)));
 });
 
+// ─── SERVE SPA ────────────────────────────────────────────────────────────────
+app.get('/pay/:id', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
+app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
-// ─── OTP + ONBOARDING ────────────────────────────────────────────────────────
-const sessions = new Map();
-
-app.post('/api/onboard', (req, res) => {
-  const { phone, password, name, displayName, parentPhone } = req.body;
-  if (!phone || !name) return res.status(400).json({ error: 'Missing fields' });
-  const sessionId = uid('sess');
-  const session = {
-    sessionId, phone, name,
-    displayName: displayName || name.split(' ')[0] + ' Creations',
-    parentPhone: parentPhone || '',
-    balance: 0, monthlyReceived: 0, monthlyLimit: 5000,
-    links: [], txns: [], createdAt: now()
-  };
-  sessions.set(sessionId, session);
-  res.json({ ok: true, sessionId, user: session });
-});
-
-app.get('/api/session/:sessionId', (req, res) => {
-  const s = sessions.get(req.params.sessionId);
-  if (!s) return res.status(404).json({ error: 'Session not found' });
-  res.json(s);
-});
-
-app.post('/api/session/:sessionId/paylinks', (req, res) => {
-  const s = sessions.get(req.params.sessionId);
-  if (!s) return res.status(404).json({ error: 'Session not found' });
-  const { amount, purpose, note, expiryDays } = req.body;
-  if (!purpose || !amount) return res.status(400).json({ error: 'Missing fields' });
-  const id = uid('lnk');
-  const link = {
-    id, amount: +amount, purpose, note: note || '',
-    displayName: s.displayName, status: 'active', txnId: null,
-    expiresAt: new Date(Date.now() + (expiryDays||7)*86400000).toISOString(),
-    createdAt: now()
-  };
-  s.links.unshift(link);
-  sessions.set(s.sessionId, s);
-  res.json({ link, payUrl: `https://yungly-paylink-production.up.railway.app/pay/${id}` });
-});
-
-app.get('/api/session/:sessionId/paylinks', (req, res) => {
-  const s = sessions.get(req.params.sessionId);
-  if (!s) return res.status(404).json({ error: 'Session not found' });
-  res.json(s.links);
-});
-
-// ─── HEALTH CHECK ────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ ok: true }));
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Yungly PayLink backend running on port ' + PORT));
+app.listen(3000, () => console.log('Yungly PayLink backend running on http://localhost:3000'));
